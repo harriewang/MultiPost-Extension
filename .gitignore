@@ -33,13 +33,3 @@ yarn-error.log*
 next-env.d.ts
 
 .idea/
-
-# claude
-.claude/
-CLAUDE.md
-
-# testfile
-tests/
-
-# docs
-docs/
