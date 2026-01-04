@@ -146,8 +146,10 @@ export async function VideoDouyin(data: SyncData) {
         clipboardData: new DataTransfer(),
       });
 
-      contentPasteEvent.clipboardData.setData("text/plain", `${content} `);
+      contentPasteEvent.clipboardData.setData("text/plain", content || "");
       contentEditor.dispatchEvent(contentPasteEvent);
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       // 处理标签
       if (tags && tags.length > 0) {
@@ -155,6 +157,14 @@ export async function VideoDouyin(data: SyncData) {
         for (const tag of tagsToSync) {
           console.log("添加标签:", tag);
           contentEditor.focus();
+
+          // 确保光标在末尾
+          const range = document.createRange();
+          range.selectNodeContents(contentEditor);
+          range.collapse(false);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
 
           const pasteEvent = new ClipboardEvent("paste", {
             bubbles: true,
