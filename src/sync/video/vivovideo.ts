@@ -1,443 +1,251 @@
 import type { SyncData, VideoData } from "../common";
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-/**
- * vivo视频发布器
- */
 export async function VideoVivoVideo(data: SyncData): Promise<void> {
   console.log("🚀 开始vivo视频发布流程...");
-  console.log("🔍 当前页面:", window.location.href);
 
-  try {
-    // 检查是否在vivo视频页面
-    if (!window.location.href.includes("video.vivo.com.cn")) {
-      console.error("❌ 不在vivo视频页面，当前页面:", window.location.href);
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function formatDate(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
+  }
+
+  async function waitForUrlChange(expectedPath: string, timeout = 30000): Promise<void> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeout) {
+      if (window.location.href.includes(expectedPath)) {
+        console.log("✅ URL已切换到:", expectedPath);
+        return;
+      }
+      await sleep(500);
+    }
+    console.log("⚠️ URL未在预期时间内切换");
+  }
+
+  async function uploadVideo(file: File): Promise<void> {
+    console.log("🎬 开始视频上传流程");
+    await sleep(2000);
+
+    // 查找文件输入框 - 支持 .mp4,.mov,.mkv 格式
+    const fileInput = document.querySelector('input[type="file"][accept*="mp4"]') as HTMLInputElement;
+    if (!fileInput) {
+      throw new Error("未找到视频文件输入框");
+    }
+
+    console.log("✅ 找到视频文件输入框");
+
+    // 设置文件
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    fileInput.files = dataTransfer.files;
+
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    console.log("✅ 视频文件已设置");
+
+    // 等待URL切换到发布页面
+    await waitForUrlChange("publishShort");
+    await sleep(3000);
+  }
+
+  async function fillDescription(contentText: string): Promise<void> {
+    console.log("📝 开始填写描述:", contentText.substring(0, 50));
+
+    // 等待描述编辑区域加载
+    await sleep(2000);
+
+    // vivo视频使用 contenteditable div 进行描述输入
+    const descSelectors = ["div.add-text[contenteditable='true']", 'div[contenteditable="true"]'];
+
+    for (const selector of descSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of Array.from(elements)) {
+        const el = element as HTMLElement;
+        if (el.offsetParent !== null) {
+          // 聚焦并填写内容
+          el.focus();
+
+          // 使用 clipboard event 模拟粘贴
+          const pasteEvent = new ClipboardEvent("paste", {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: new DataTransfer(),
+          });
+          (pasteEvent.clipboardData as DataTransfer).setData("text/plain", contentText);
+          el.dispatchEvent(pasteEvent);
+
+          console.log("✅ 描述已填写");
+          el.blur();
+          return;
+        }
+      }
+    }
+
+    console.log("⚠️ 未找到描述输入框");
+  }
+
+  async function fillTitle(titleText: string): Promise<void> {
+    console.log("📝 开始填写标题:", titleText);
+
+    // vivo视频的标题可能在URL参数中或者单独的输入框
+    // 先尝试查找标题输入框
+    const titleSelectors = ['input[placeholder*="标题"]', 'input[placeholder*="请输入标题"]', "input.el-input__inner"];
+
+    for (const selector of titleSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of Array.from(elements)) {
+        const input = element as HTMLInputElement;
+        if (input.offsetParent !== null && !input.placeholder?.includes("请选择")) {
+          input.value = titleText;
+          input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+          console.log("✅ 标题已填写:", titleText);
+          return;
+        }
+      }
+    }
+
+    // 如果没有找到标题输入框，vivo可能使用文件名作为标题
+    console.log("⚠️ 未找到标题输入框，将使用文件名作为标题");
+  }
+
+  async function setScheduledPublishTime(scheduledTime: string): Promise<void> {
+    console.log("⏰ 设置定时发布:", scheduledTime);
+
+    // 查找"定时发布"单选按钮
+    const radioButtons = document.querySelectorAll('input[type="radio"].el-radio__original');
+    let scheduledRadio: HTMLInputElement | null = null;
+
+    for (const radio of Array.from(radioButtons)) {
+      const label = radio.closest("label")?.textContent || "";
+      if (label.includes("定时发布")) {
+        scheduledRadio = radio as HTMLInputElement;
+        break;
+      }
+    }
+
+    if (!scheduledRadio) {
+      console.log("⚠️ 未找到定时发布选项");
       return;
     }
 
-    // 解析视频数据
+    // 点击定时发布选项
+    scheduledRadio.click();
+    scheduledRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    console.log("✅ 已选择定时发布");
+
+    await sleep(1000);
+
+    // 查找日期时间输入框
+    const dateInput = document.querySelector('input[type="text"][readonly]') as HTMLInputElement;
+    if (!dateInput) {
+      console.log("⚠️ 未找到日期时间输入框");
+      return;
+    }
+
+    // 设置日期时间（格式：yyyy-MM-dd HH:mm）
+    const date = new Date(scheduledTime);
+    const formattedDate = formatDate(date);
+
+    dateInput.value = formattedDate;
+    dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+    dateInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+    console.log("✅ 定时发布时间已设置:", formattedDate);
+  }
+
+  try {
     if (!data || !data.data) {
       console.error("❌ 缺少视频数据");
       return;
     }
 
-    const { content, video, title } = data.data as VideoData;
-    console.log("📝 视频数据:", {
-      title: title?.substring(0, 50),
-      contentLength: content?.length,
-      hasVideo: !!video,
-    });
+    const { content, video, title, tags, scheduledPublishTime } = data.data as VideoData;
 
-    // 内联定义vivo视频上传器类
-    const VivoVideoUploader = class VivoVideoUploader {
-      /**
-       * 等待指定时间
-       */
-      public sleep(ms: number): Promise<void> {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-      }
-
-      /**
-       * 等待元素出现
-       */
-      private async waitForElement(selector: string, timeout = 10000): Promise<Element> {
-        return new Promise((resolve, reject) => {
-          const element = document.querySelector(selector);
-          if (element) {
-            resolve(element);
-            return;
-          }
-
-          const observer = new MutationObserver(() => {
-            const element = document.querySelector(selector);
-            if (element) {
-              resolve(element);
-              observer.disconnect();
-            }
-          });
-
-          observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-          });
-
-          setTimeout(() => {
-            observer.disconnect();
-            reject(new Error(`Element with selector "${selector}" not found within ${timeout}ms`));
-          }, timeout);
-        });
-      }
-
-      /**
-       * 填写标题
-       */
-      public async fillTitle(title: string): Promise<void> {
-        try {
-          console.log("📝 填写标题:", title);
-
-          // 等待页面加载
-          await this.sleep(3000);
-
-          // vivo视频标题输入框选择器
-          const titleSelectors = [
-            'input[placeholder*="标题"]',
-            'input[placeholder*="title"]',
-            'input[name*="title"]',
-            'input[class*="title"]',
-            'input[type="text"]',
-            '.ant-input[type="text"]',
-            ".ant-input",
-            "#title",
-            'textarea[placeholder*="标题"]',
-            '.form-input[type="text"]',
-            '.el-input__inner[type="text"]',
-            ".vivo-input",
-          ];
-
-          for (const selector of titleSelectors) {
-            const titleElement = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement;
-            if (titleElement && titleElement.offsetParent !== null) {
-              console.log("✅ 找到标题输入框:", selector);
-
-              try {
-                // 清空原有内容
-                titleElement.focus();
-                titleElement.select();
-
-                // 逐字符输入模拟真实用户行为
-                for (let i = 0; i < title.length; i++) {
-                  const _char = title[i];
-                  titleElement.value = title.substring(0, i + 1);
-
-                  // 触发输入事件
-                  titleElement.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-                  await this.sleep(50);
-                }
-
-                // 触发多种事件确保框架识别
-                titleElement.dispatchEvent(new Event("focus", { bubbles: true }));
-                titleElement.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-                titleElement.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-                titleElement.dispatchEvent(new Event("blur", { bubbles: true }));
-
-                // 验证设置是否成功
-                console.log(`✅ 标题设置后验证: value="${titleElement.value}"`);
-                if (titleElement.value === title) {
-                  console.log("✅ 标题填写成功");
-                  return;
-                }
-              } catch (e) {
-                console.error("设置标题值时出错:", e);
-              }
-            }
-          }
-
-          console.log("❌ 未找到可用的标题输入框");
-          return;
-        } catch (error) {
-          console.error("填写标题失败:", error);
-          return;
-        }
-      }
-
-      /**
-       * 填写描述
-       */
-      public async fillDescription(description: string): Promise<void> {
-        try {
-          console.log("📝 填写描述:", `${description.substring(0, 100)}...`);
-
-          // vivo视频描述输入框选择器
-          const descSelectors = [
-            'textarea[placeholder*="描述"]',
-            'textarea[placeholder*="简介"]',
-            'textarea[placeholder*="内容"]',
-            'textarea[name*="content"]',
-            'textarea[name*="desc"]',
-            "textarea",
-            ".ant-input",
-            "#content",
-            "#description",
-            ".form-textarea",
-            ".el-textarea__inner",
-            ".vivo-textarea",
-          ];
-
-          for (const selector of descSelectors) {
-            const descElement = document.querySelector(selector) as HTMLTextAreaElement;
-            if (descElement && descElement.offsetParent !== null) {
-              console.log("✅ 找到描述输入框:", selector);
-
-              try {
-                descElement.focus();
-                descElement.value = description;
-
-                // 触发多种事件
-                descElement.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-                descElement.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-
-                console.log("✅ 描述填写成功");
-                return;
-              } catch (e) {
-                console.error("设置描述值时出错:", e);
-              }
-            }
-          }
-
-          console.log("❌ 未找到可用的描述输入框");
-          return;
-        } catch (error) {
-          console.error("填写描述失败:", error);
-          return;
-        }
-      }
-
-      /**
-       * 上传视频文件
-       */
-      public async uploadVideo(videoData: any): Promise<void> {
-        try {
-          console.log("📹 开始上传视频...");
-
-          // 获取视频文件
-          let file: File;
-          if (videoData.videoFile) {
-            file = videoData.videoFile;
-          } else if (videoData.url) {
-            const response = await fetch(videoData.url);
-            const arrayBuffer = await response.arrayBuffer();
-            const extension = videoData.name.split(".").pop() || "mp4";
-            const fileName = `${videoData.name.replace(/\.[^/.]+$/, "")}.${extension}`;
-            file = new File([arrayBuffer], fileName, { type: "video/mp4" });
-          } else {
-            console.error("❌ 无效的视频数据");
-            return;
-          }
-
-          console.log("📁 视频文件:", file.name, file.size, file.type);
-
-          // 等待页面完全加载
-          console.log("⏳ 等待页面加载完成...");
-          await this.sleep(5000);
-
-          // 查找上传区域
-          console.log("🔍 查找vivo视频上传区域...");
-          const uploadSelectors = [
-            ".upload-area",
-            ".video-upload",
-            '[class*="upload"]',
-            '[class*="video"]',
-            ".ant-upload",
-            "#upload",
-            ".upload-btn",
-            'button[class*="upload"]',
-            ".upload-container",
-            ".el-upload",
-            ".el-upload-dragger",
-            ".vivo-upload",
-            ".upload-wrapper",
-          ];
-
-          let uploadArea: HTMLElement | null = null;
-          for (const selector of uploadSelectors) {
-            const element = document.querySelector(selector) as HTMLElement | null;
-            if (element && element.offsetParent !== null) {
-              console.log(`✅ 找到上传区域: ${selector}`);
-              uploadArea = element;
-              break;
-            }
-          }
-
-          if (!uploadArea) {
-            console.log("❌ 未找到上传区域，尝试查找文件输入框...");
-
-            // 直接查找文件输入框
-            const fileInputs = document.querySelectorAll('input[type="file"]');
-            console.log(`🔍 找到 ${fileInputs.length} 个文件输入框`);
-
-            let targetInput: HTMLInputElement | null = null;
-            fileInputs.forEach((input, index) => {
-              const accept = input.getAttribute("accept") || "";
-              console.log(`  输入框 ${index + 1}: accept="${accept}"`);
-
-              // 优先查找视频文件输入框
-              if (accept.includes("video") || accept.includes("*") || accept === "") {
-                targetInput = input as HTMLInputElement;
-                console.log(`✅ 选择输入框 ${index + 1} 作为目标`);
-              }
-            });
-
-            if (targetInput) {
-              // 使用DataTransfer API设置文件
-              const dataTransfer = new DataTransfer();
-              dataTransfer.items.add(file);
-              targetInput.files = dataTransfer.files;
-
-              // 触发change事件
-              targetInput.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-              console.log("✅ 文件已设置到输入框");
-              return;
-            }
-            console.log("❌ 未找到合适的文件输入框");
-            return;
-          }
-
-          // 如果找到了上传区域，尝试点击或操作
-          console.log("🔄 尝试操作上传区域...");
-
-          // 查找上传区域内的文件输入框
-          const uploadInput = uploadArea.querySelector('input[type="file"]') as HTMLInputElement;
-          if (uploadInput) {
-            console.log("✅ 在上传区域内找到文件输入框");
-
-            // 创建透明的文件输入框覆盖上传区域
-            const overlayInput = document.createElement("input");
-            overlayInput.type = "file";
-            overlayInput.accept = "video/*,.mp4,.avi,.mov,.wmv";
-            overlayInput.style.position = "absolute";
-            overlayInput.style.opacity = "0";
-            overlayInput.style.width = "100%";
-            overlayInput.style.height = "100%";
-            overlayInput.style.top = "0";
-            overlayInput.style.left = "0";
-            overlayInput.style.zIndex = "9999";
-            overlayInput.id = `vivo_upload_${Date.now()}`;
-
-            // 设置上传区域样式以支持覆盖
-            const uploadElement = uploadArea as HTMLElement;
-            uploadElement.style.position = "relative";
-            uploadElement.appendChild(overlayInput);
-
-            // 设置文件
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            overlayInput.files = dataTransfer.files;
-
-            // 触发文件选择事件
-            overlayInput.dispatchEvent(new Event("focus", { bubbles: true }));
-            overlayInput.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-
-            console.log("✅ 文件已设置到覆盖输入框");
-
-            // 尝试点击上传区域（如果需要）
-            if (uploadArea.tagName === "BUTTON" || uploadArea.closest("button")) {
-              console.log("🖱️ 点击上传按钮...");
-              ((uploadArea.closest("button") as HTMLElement) || uploadArea).click();
-              await this.sleep(1000);
-            }
-
-            // 等待上传开始
-            await this.waitForUploadStart();
-
-            return;
-          }
-          console.log("⚠️ 上传区域内未找到文件输入框，尝试点击上传区域...");
-
-          // 点击上传区域触发文件选择
-          const clickableElement = uploadArea.closest("button") || uploadArea.querySelector("button") || uploadArea;
-          if (clickableElement) {
-            console.log("🖱️ 点击可点击元素...");
-            (clickableElement as HTMLElement).click();
-            await this.sleep(2000);
-
-            // 再次查找文件输入框
-            const newFileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-            if (newFileInput) {
-              const dataTransfer = new DataTransfer();
-              dataTransfer.items.add(file);
-              newFileInput.files = dataTransfer.files;
-              newFileInput.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-              console.log("✅ 文件已设置到新找到的输入框");
-              return;
-            }
-          }
-
-          console.log("⚠️ 无法直接上传文件，但页面可能已经准备好了");
-          return;
-        } catch (error) {
-          console.error("❌ 视频上传失败:", error);
-          return;
-        }
-      }
-
-      /**
-       * 等待上传开始
-       */
-      private async waitForUploadStart(): Promise<void> {
-        console.log("⏳ 等待上传开始...");
-
-        for (let i = 0; i < 30; i++) {
-          await this.sleep(1000);
-
-          // 检查上传进度指示器
-          const progressSelectors = [
-            '[class*="progress"]',
-            '[class*="uploading"]',
-            '[class*="upload-progress"]',
-            ".ant-progress",
-            ".progress-bar",
-            ".uploading",
-            ".el-progress",
-            ".vivo-progress",
-          ];
-
-          for (const selector of progressSelectors) {
-            const elements = document.querySelectorAll(selector);
-            if (elements.length > 0) {
-              console.log("✅ 检测到上传进度指示器");
-              return;
-            }
-          }
-
-          // 检查是否有上传成功标志
-          const successSelectors = ['[class*="success"]', '[class*="complete"]', '[class*="done"]', ".upload-success"];
-
-          for (const selector of successSelectors) {
-            const elements = document.querySelectorAll(selector);
-            if (elements.length > 0) {
-              console.log("✅ 检测到上传成功标志");
-              return;
-            }
-          }
-        }
-
-        console.log("⚠️ 未检测到明确的上传状态，但可能已开始");
-      }
-    };
-
-    console.log("✅ vivo视频上传器类定义完成");
-
-    const uploader = new VivoVideoUploader();
-    console.log("✅ vivo视频上传器实例创建完成");
-
-    // 步骤1: 填写标题
-    if (title) {
-      console.log("📝 填写标题:", title);
-      await uploader.fillTitle(title);
-    }
-
-    // 步骤2: 填写描述
-    if (content) {
-      console.log("📝 填写描述:", `${content.substring(0, 100)}...`);
-      await uploader.fillDescription(content);
-    }
-
-    // 步骤3: 上传视频
-    if (video) {
-      console.log("🎥 开始上传视频...");
-      await uploader.uploadVideo(video);
-    } else {
+    if (!video) {
       console.error("❌ 缺少视频文件");
       return;
     }
 
-    console.log("🎉 vivo视频发布流程完成");
-    return;
+    // 下载视频文件
+    console.log("📥 下载视频文件...");
+    const response = await fetch(video.url);
+    const arrayBuffer = await response.arrayBuffer();
+    const videoFile = new File([arrayBuffer], video.name, { type: video.type });
+    console.log("✅ 视频文件准备完成");
+
+    // 步骤1: 上传视频
+    console.log("📤 开始上传视频...");
+    await uploadVideo(videoFile);
+
+    // 步骤2: 填写标题
+    if (title) {
+      await fillTitle(title);
+    }
+
+    // 步骤3: 填写描述（包含标签作为话题）
+    let finalContent = content || "";
+    if (tags && tags.length > 0) {
+      const tagString = tags.map((tag) => `#${tag}`).join(" ");
+      finalContent = `${finalContent} ${tagString}`.trim();
+      console.log("📝 合并标签后的内容:", finalContent.substring(0, 100));
+    }
+
+    if (finalContent) {
+      await fillDescription(finalContent);
+    }
+
+    // 步骤4: 设置定时发布（如果指定）
+    if (scheduledPublishTime) {
+      await setScheduledPublishTime(scheduledPublishTime);
+    }
+
+    // 自动发布
+    if (data.isAutoPublish) {
+      await sleep(2000);
+
+      // 查找提交按钮 - ElementUI 主要按钮样式
+      const submitSelectors = [
+        "button.el-button--primary.form-btn",
+        "button.form-btn.el-button--primary",
+        'button:contains("提交")',
+        'button:contains("发布")',
+      ];
+
+      let submitButton: HTMLElement | null = null;
+
+      // 先通过类名查找
+      for (const selector of submitSelectors) {
+        if (selector.includes(":contains")) {
+          // 通过文本查找
+          const buttons = document.querySelectorAll("button");
+          for (const button of Array.from(buttons)) {
+            if (button.textContent?.includes("提交") || button.textContent?.includes("发布")) {
+              submitButton = button as HTMLElement;
+              break;
+            }
+          }
+        } else {
+          submitButton = document.querySelector(selector) as HTMLElement;
+        }
+        if (submitButton) break;
+      }
+
+      if (submitButton) {
+        console.log("🚀 点击发布按钮");
+        submitButton.click();
+      } else {
+        console.log("⚠️ 未找到发布按钮");
+      }
+    }
+
+    console.log("✅ vivo视频发布流程完成");
   } catch (error) {
-    console.error("💥 vivo视频发布失败:", error);
-    console.error("错误详情:", error.stack);
-    return;
+    console.error("❌ vivo视频发布失败:", error);
   }
 }
