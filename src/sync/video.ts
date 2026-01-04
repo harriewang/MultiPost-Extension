@@ -310,7 +310,7 @@ export const VideoInfoMap: Record<string, PlatformInfo> = {
     homeUrl: "https://kaixinkan.vivo.com.cn/",
     faviconUrl: "https://www.vivo.com.cn/favicon.ico",
     platformName: chrome.i18n.getMessage("platformVivoVideo"),
-    injectUrl: "https://kaixinkan.vivo.com.cn/#/home",
+    injectUrl: "https://www.kaixinkan.com.cn/#/content/uploads",
     injectFunction: VideoVivoVideo,
     tags: ["CN"],
     accountKey: "vivovideo",
