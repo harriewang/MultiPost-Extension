@@ -50,7 +50,17 @@ export async function VideoVivoVideo(data: SyncData): Promise<void> {
 
     // 等待URL切换到发布页面
     await waitForUrlChange("publishShort");
-    await sleep(3000);
+
+    // 等待视频上传和处理完成（等待"编辑封面"按钮出现）
+    console.log("⏳ 等待视频上传完成...");
+    for (let i = 0; i < 60; i++) {
+      const editCoverBtn = document.querySelector("span.edit-btn.is-edit-cover") as HTMLElement;
+      if (editCoverBtn && editCoverBtn.offsetParent !== null) {
+        console.log("✅ 视频上传完成");
+        break;
+      }
+      await sleep(1000);
+    }
   }
 
   async function fillDescription(contentText: string): Promise<void> {
@@ -60,30 +70,23 @@ export async function VideoVivoVideo(data: SyncData): Promise<void> {
     await sleep(2000);
 
     // vivo视频使用 contenteditable div 进行描述输入
-    const descSelectors = ["div.add-text[contenteditable='true']", 'div[contenteditable="true"]'];
+    // 直接使用 .add-text 类选择器
+    const descDiv = document.querySelector("div.add-text[contenteditable='true']") as HTMLElement;
 
-    for (const selector of descSelectors) {
-      const elements = document.querySelectorAll(selector);
-      for (const element of Array.from(elements)) {
-        const el = element as HTMLElement;
-        if (el.offsetParent !== null) {
-          // 聚焦并填写内容
-          el.focus();
+    if (descDiv && descDiv.offsetParent !== null) {
+      // 聚焦并填写内容
+      descDiv.focus();
 
-          // 使用 clipboard event 模拟粘贴
-          const pasteEvent = new ClipboardEvent("paste", {
-            bubbles: true,
-            cancelable: true,
-            clipboardData: new DataTransfer(),
-          });
-          (pasteEvent.clipboardData as DataTransfer).setData("text/plain", contentText);
-          el.dispatchEvent(pasteEvent);
+      // 直接设置文本内容
+      descDiv.innerText = contentText;
 
-          console.log("✅ 描述已填写");
-          el.blur();
-          return;
-        }
-      }
+      // 触发输入事件
+      descDiv.dispatchEvent(new Event("input", { bubbles: true }));
+      descDiv.dispatchEvent(new Event("change", { bubbles: true }));
+
+      console.log("✅ 描述已填写");
+      descDiv.blur();
+      return;
     }
 
     console.log("⚠️ 未找到描述输入框");
@@ -112,6 +115,80 @@ export async function VideoVivoVideo(data: SyncData): Promise<void> {
 
     // 如果没有找到标题输入框，vivo可能使用文件名作为标题
     console.log("⚠️ 未找到标题输入框，将使用文件名作为标题");
+  }
+
+  async function uploadCover(coverData: { url: string; name: string; type?: string; file?: File }): Promise<void> {
+    console.log("🖼️ 开始上传封面...");
+
+    await sleep(2000);
+
+    // 点击"编辑封面"按钮
+    const editCoverBtn = document.querySelector("span.edit-btn.is-edit-cover") as HTMLElement;
+    if (editCoverBtn) {
+      editCoverBtn.click();
+      console.log("✅ 已点击编辑封面按钮");
+      await sleep(1000);
+    } else {
+      console.log("⚠️ 未找到编辑封面按钮");
+      return;
+    }
+
+    // 等待封面上传对话框出现
+    for (let i = 0; i < 10; i++) {
+      // 查找"上传封面"标签并点击
+      const uploadTab = Array.from(document.querySelectorAll("*")).find(
+        (el) => el.childNodes.length === 1 && el.textContent?.trim() === "上传封面",
+      );
+      if (uploadTab) {
+        (uploadTab as HTMLElement).click();
+        console.log("✅ 已切换到上传封面标签");
+        await sleep(500);
+      }
+
+      // 点击"点击上传"触发文件输入框
+      const uploadText = Array.from(document.querySelectorAll("*")).find(
+        (el) => el.childNodes.length === 1 && el.textContent?.trim() === "点击上传",
+      );
+      if (uploadText) {
+        (uploadText as HTMLElement).click();
+        console.log("✅ 已点击上传区域");
+        await sleep(500);
+      }
+
+      // 查找文件输入框
+      const fileInput = document.querySelector('input[type="file"][accept*="image"]') as HTMLInputElement;
+      if (fileInput) {
+        let coverFile: File;
+        if (coverData.file) {
+          coverFile = coverData.file;
+        } else {
+          const res = await fetch(coverData.url);
+          const blob = await res.blob();
+          coverFile = new File([blob], coverData.name, { type: coverData.type || "image/jpeg" });
+        }
+
+        const dt = new DataTransfer();
+        dt.items.add(coverFile);
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+        console.log("✅ 封面文件已设置");
+
+        // 等待图片上传完成
+        await sleep(3000);
+
+        // 点击确定按钮
+        const confirmBtn = Array.from(document.querySelectorAll("button")).find((b) =>
+          b.textContent?.includes("确定"),
+        ) as HTMLButtonElement;
+
+        if (confirmBtn) {
+          confirmBtn.click();
+          console.log("✅ 已点击确定按钮");
+        }
+        break;
+      }
+      await sleep(500);
+    }
   }
 
   async function setScheduledPublishTime(scheduledTime: string): Promise<void> {
@@ -165,7 +242,7 @@ export async function VideoVivoVideo(data: SyncData): Promise<void> {
       return;
     }
 
-    const { content, video, title, tags, scheduledPublishTime } = data.data as VideoData;
+    const { content, video, title, tags, cover, scheduledPublishTime } = data.data as VideoData;
 
     if (!video) {
       console.error("❌ 缺少视频文件");
@@ -200,7 +277,12 @@ export async function VideoVivoVideo(data: SyncData): Promise<void> {
       await fillDescription(finalContent);
     }
 
-    // 步骤4: 设置定时发布（如果指定）
+    // 步骤4: 上传封面
+    if (cover) {
+      await uploadCover(cover);
+    }
+
+    // 步骤5: 设置定时发布（如果指定）
     if (scheduledPublishTime) {
       await setScheduledPublishTime(scheduledPublishTime);
     }
