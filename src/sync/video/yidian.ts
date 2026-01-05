@@ -177,8 +177,9 @@ export async function VideoYidian(data: SyncData): Promise<void> {
         const tagContainer = document.querySelector(".tagsuginput-container");
 
         if (tagContainer) {
-          // 直接访问 __vue__ 属性
-          tagVue = (tagContainer as any).__vue__;
+          // 尝试多种方式获取 Vue 实例
+          const el = tagContainer as any;
+          tagVue = el.__vue__ || el._vnode?.context;
         }
 
         if (tagVue?.$data?.tags !== undefined) {
