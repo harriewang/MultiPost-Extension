@@ -20,6 +20,7 @@ import { VideoToutiaohao } from "./video/toutiaohao";
 import { VideoVivoVideo } from "./video/vivovideo";
 import { VideoWeibo } from "./video/weibo";
 import { VideoWeiXinChannel } from "./video/weixinchannel";
+import { VideoX } from "./video/x";
 import { VideoXiaoheihe } from "./video/xiaoheihe";
 import { VideoYiche } from "./video/yiche";
 import { VideoYidian } from "./video/yidian";
@@ -314,5 +315,16 @@ export const VideoInfoMap: Record<string, PlatformInfo> = {
     injectFunction: VideoVivoVideo,
     tags: ["CN"],
     accountKey: "vivovideo",
+  },
+  VIDEO_X: {
+    type: "VIDEO",
+    name: "VIDEO_X",
+    homeUrl: "https://x.com/",
+    faviconUrl: "https://abs.twimg.com/favicons/twitter.3.ico",
+    platformName: chrome.i18n.getMessage("platformX"),
+    injectUrl: "https://x.com/home",
+    injectFunction: VideoX,
+    tags: ["CN"],
+    accountKey: "xvideo",
   },
 };

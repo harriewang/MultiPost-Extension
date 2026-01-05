@@ -5,429 +5,425 @@ import type { SyncData, VideoData } from "../common";
 
 /**
  * 易车视频发布器
+ *
+ * 功能：
+ * - 自动上传视频文件
+ * - 自动填写标题
+ * - 自动填写视频简介
+ * - 自动上传封面（含裁剪）
+ * - 自动选择版权（原创）
+ *
+ * 注意：焦点图需要手动上传，提交按钮需要手动点击
  */
 export async function VideoYiche(data: SyncData): Promise<void> {
-  console.log("🚀 开始易车视频发布流程...");
-  console.log("🔍 当前页面:", window.location.href);
+  // ========== 辅助函数定义 ==========
 
-  try {
-    // 检查是否在易车页面
-    if (!window.location.href.includes("mp.yiche.com")) {
-      console.error("❌ 不在易车页面，当前页面:", window.location.href);
-      return;
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function clickElement(element: Element): void {
+    (element as HTMLElement).click();
+  }
+
+  function findButtonByText(text: string): Element | null {
+    const elements = document.querySelectorAll("button, a, [role='button'], .upload-content, .upload, i, span");
+    for (const el of elements) {
+      if (el.textContent?.includes(text)) {
+        // 如果是 upload-content 或 upload，返回其可点击的父容器
+        if (el.classList.contains("upload-content") || el.classList.contains("upload")) {
+          const parent = el.closest(".upload-img-box, .avatar-uploader, .el-upload, .i-right");
+          if (parent) return parent;
+        }
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function findFileInput(): HTMLInputElement | null {
+    const input = document.querySelector('input[type="file"]');
+    return input as HTMLInputElement | null;
+  }
+
+  function setFileInput(input: HTMLInputElement, file: File): void {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    input.files = dataTransfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function blobUrlToFile(blobUrl: string, filename: string): Promise<File | null> {
+    try {
+      const response = await fetch(blobUrl);
+      const blob = await response.blob();
+      return new File([blob], filename, { type: blob.type });
+    } catch (error) {
+      console.error("[易车] ❌ blob URL 转换失败:", error);
+      return null;
+    }
+  }
+
+  async function waitForFormReady(): Promise<void> {
+    const maxWait = 30;
+    for (let i = 0; i < maxWait; i++) {
+      // 检查并关闭提示弹窗
+      const tips = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("我知道了"));
+      if (tips) {
+        clickElement(tips);
+        console.log("[易车] ✅ 已关闭提示弹窗");
+        await sleep(500);
+      }
+
+      const titleInput =
+        document.querySelector('[role="textbox"]') ||
+        document.querySelector('input[placeholder*="标题"]') ||
+        document.querySelector('textarea[placeholder*="标题"]');
+      if (titleInput) {
+        return;
+      }
+      await sleep(1000);
+    }
+    console.warn("[易车] ⚠️ 表单加载超时");
+  }
+
+  async function uploadVideoFile(video: { url: string; name?: string }): Promise<boolean> {
+    try {
+      const uploadBtn = findButtonByText("点击上传视频");
+      if (!uploadBtn) {
+        console.error("[易车] ❌ 未找到视频上传按钮");
+        return false;
+      }
+
+      console.log("[易车] 找到上传按钮，点击...");
+      clickElement(uploadBtn);
+      await sleep(500);
+
+      const fileInput = findFileInput();
+      if (!fileInput) {
+        console.error("[易车] ❌ 未找到文件输入框");
+        return false;
+      }
+
+      const file = await blobUrlToFile(video.url, video.name || "video.mp4");
+      if (!file) {
+        console.error("[易车] ❌ 文件转换失败");
+        return false;
+      }
+
+      setFileInput(fileInput, file);
+      console.log("[易车] ✅ 文件已添加到输入框:", file.name, file.size);
+      console.log("[易车] ✅ 视频文件已添加，上传在后台进行");
+
+      return true;
+    } catch (error) {
+      console.error("[易车] ❌ 上传视频异常:", error);
+      return false;
+    }
+  }
+
+  async function uploadCoverImage(cover: { url: string; name?: string }): Promise<boolean> {
+    try {
+      // 关闭可能的弹窗
+      const tips = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("我知道了"));
+      if (tips) {
+        clickElement(tips);
+        console.log("[易车] ✅ 已关闭提示弹窗");
+        await sleep(500);
+      }
+
+      const uploadBtn = findButtonByText("上传封面");
+      if (!uploadBtn) {
+        console.error("[易车] ❌ 未找到封面上传按钮");
+        return false;
+      }
+
+      console.log("[易车] 找到封面上传按钮，点击...");
+      clickElement(uploadBtn);
+      await sleep(500);
+
+      const fileInput = findFileInput();
+      if (!fileInput) {
+        console.error("[易车] ❌ 未找到文件输入框");
+        return false;
+      }
+
+      const file = await blobUrlToFile(cover.url, cover.name || "cover.jpg");
+      if (!file) {
+        return false;
+      }
+
+      setFileInput(fileInput, file);
+      console.log("[易车] ✅ 封面文件已添加");
+      await sleep(2000);
+
+      await handleCoverCrop();
+
+      return true;
+    } catch (error) {
+      console.error("[易车] ❌ 封面上传异常:", error);
+      return false;
+    }
+  }
+
+  async function uploadVerticalCoverImage(cover: { url: string; name?: string }): Promise<boolean> {
+    try {
+      // 关闭可能的弹窗
+      const tips = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("我知道了"));
+      if (tips) {
+        clickElement(tips);
+        console.log("[易车] ✅ 已关闭提示弹窗");
+        await sleep(500);
+      }
+
+      const uploadBtn = findButtonByText("上传竖版封面");
+      if (!uploadBtn) {
+        console.error("[易车] ❌ 未找到竖版封面上传按钮");
+        return false;
+      }
+
+      console.log("[易车] 找到竖版封面上传按钮，点击...");
+      clickElement(uploadBtn);
+      await sleep(500);
+
+      const fileInput = findFileInput();
+      if (!fileInput) {
+        console.error("[易车] ❌ 未找到文件输入框");
+        return false;
+      }
+
+      const file = await blobUrlToFile(cover.url, cover.name || "vertical_cover.jpg");
+      if (!file) {
+        return false;
+      }
+
+      setFileInput(fileInput, file);
+      console.log("[易车] ✅ 竖版封面文件已添加");
+      await sleep(2000);
+
+      await handleCoverCrop();
+
+      return true;
+    } catch (error) {
+      console.error("[易车] ❌ 竖版封面上传异常:", error);
+      return false;
+    }
+  }
+
+  async function uploadFocusImage(image: { url: string; name?: string }): Promise<boolean> {
+    try {
+      // 关闭可能的弹窗
+      const tips = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("我知道了"));
+      if (tips) {
+        clickElement(tips);
+        console.log("[易车] ✅ 已关闭提示弹窗");
+        await sleep(500);
+      }
+
+      const uploadBtn = findButtonByText("上传焦点图");
+      if (!uploadBtn) {
+        console.error("[易车] ❌ 未找到焦点图上传按钮");
+        return false;
+      }
+
+      console.log("[易车] 找到焦点图上传按钮，点击...");
+      clickElement(uploadBtn);
+      await sleep(500);
+
+      const fileInput = findFileInput();
+      if (!fileInput) {
+        console.error("[易车] ❌ 未找到文件输入框");
+        return false;
+      }
+
+      const file = await blobUrlToFile(image.url, image.name || "focus_image.jpg");
+      if (!file) {
+        return false;
+      }
+
+      setFileInput(fileInput, file);
+      console.log("[易车] ✅ 焦点图文件已添加");
+      await sleep(3000);
+
+      return true;
+    } catch (error) {
+      console.error("[易车] ❌ 焦点图上传异常:", error);
+      return false;
+    }
+  }
+
+  async function handleCoverCrop(): Promise<void> {
+    try {
+      await sleep(1000);
+
+      // 步骤1: 点击"完成裁剪"
+      const cropBtn = findButtonByText("完成裁剪");
+      if (cropBtn) {
+        clickElement(cropBtn);
+        console.log("[易车] ✅ 已点击完成裁剪");
+        await sleep(2000);
+      }
+
+      // 步骤2: 点击"确定"按钮
+      const buttons = Array.from(document.querySelectorAll("button"));
+      const confirmBtn = buttons.find(
+        (b) => b.textContent?.trim() === "确定" && b.classList.contains("el-button--primary"),
+      );
+
+      if (confirmBtn) {
+        clickElement(confirmBtn);
+        console.log("[易车] ✅ 已点击确定");
+        await sleep(1000);
+      }
+    } catch (error) {
+      console.warn("[易车] ⚠️ 裁剪处理失败:", error);
+    }
+  }
+
+  function fillInputByPlaceholder(placeholder: string, value: string): void {
+    const inputs = [
+      document.querySelector(`input[placeholder*="${placeholder}"]`),
+      document.querySelector(`textarea[placeholder*="${placeholder}"]`),
+      document.querySelector(`[placeholder*="${placeholder}"]`),
+    ];
+
+    for (const input of inputs) {
+      if (input) {
+        const element = input as HTMLInputElement | HTMLTextAreaElement;
+        element.value = value;
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        console.log("[易车] ✅ 已填写:", placeholder.substring(0, 10), value.substring(0, 30));
+        return;
+      }
     }
 
-    // 解析视频数据
-    if (!data || !data.data) {
-      console.error("❌ 缺少视频数据");
-      return;
-    }
-
-    const { content, video, title } = data.data as VideoData;
-    console.log("📝 视频数据:", {
-      title: title?.substring(0, 50),
-      contentLength: content?.length,
-      hasVideo: !!video,
+    const textbox = Array.from(document.querySelectorAll('[role="textbox"]')).find((el) => {
+      const placeholder = el.getAttribute("aria-placeholder") || el.getAttribute("placeholder");
+      return placeholder?.includes(placeholder.substring(0, 5));
     });
 
-    // 内联定义易车视频上传器类
-    const YicheVideoUploader = class YicheVideoUploader {
-      /**
-       * 等待指定时间
-       */
-      public sleep(ms: number): Promise<void> {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-      }
-
-      /**
-       * 等待元素出现
-       */
-      private async waitForElement(selector: string, timeout = 10000): Promise<Element> {
-        return new Promise((resolve, reject) => {
-          const element = document.querySelector(selector);
-          if (element) {
-            resolve(element);
-            return;
-          }
-
-          const observer = new MutationObserver(() => {
-            const element = document.querySelector(selector);
-            if (element) {
-              resolve(element);
-              observer.disconnect();
-            }
-          });
-
-          observer.observe(document.body, {
-            childList: true,
-            subtree: true,
-          });
-
-          setTimeout(() => {
-            observer.disconnect();
-            reject(new Error(`Element with selector "${selector}" not found within ${timeout}ms`));
-          }, timeout);
-        });
-      }
-
-      /**
-       * 填写标题
-       */
-      public async fillTitle(title: string): Promise<void> {
-        try {
-          console.log("📝 填写标题:", title);
-
-          // 等待页面加载
-          await this.sleep(3000);
-
-          // 易车标题输入框选择器
-          const titleSelectors = [
-            'input[placeholder*="标题"]',
-            'input[placeholder*="title"]',
-            'input[name*="title"]',
-            'input[class*="title"]',
-            'input[type="text"]',
-            '.ant-input[type="text"]',
-            ".ant-input",
-            "#title",
-            'textarea[placeholder*="标题"]',
-            '.form-input[type="text"]',
-          ];
-
-          for (const selector of titleSelectors) {
-            const titleElement = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement;
-            if (titleElement && titleElement.offsetParent !== null) {
-              console.log("✅ 找到标题输入框:", selector);
-
-              try {
-                // 清空原有内容
-                titleElement.focus();
-                titleElement.select();
-
-                // 逐字符输入模拟真实用户行为
-                for (let i = 0; i < title.length; i++) {
-                  const _char = title[i];
-                  titleElement.value = title.substring(0, i + 1);
-
-                  // 触发输入事件
-                  titleElement.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-                  await this.sleep(50);
-                }
-
-                // 触发多种事件确保框架识别
-                titleElement.dispatchEvent(new Event("focus", { bubbles: true }));
-                titleElement.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-                titleElement.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-                titleElement.dispatchEvent(new Event("blur", { bubbles: true }));
-
-                // 验证设置是否成功
-                console.log(`✅ 标题设置后验证: value="${titleElement.value}"`);
-                if (titleElement.value === title) {
-                  console.log("✅ 标题填写成功");
-                  return;
-                }
-              } catch (e) {
-                console.error("设置标题值时出错:", e);
-              }
-            }
-          }
-
-          console.log("❌ 未找到可用的标题输入框");
-          return;
-        } catch (error) {
-          console.error("填写标题失败:", error);
-          return;
-        }
-      }
-
-      /**
-       * 填写描述
-       */
-      public async fillDescription(description: string): Promise<void> {
-        try {
-          console.log("📝 填写描述:", `${description.substring(0, 100)}...`);
-
-          // 易车描述输入框选择器
-          const descSelectors = [
-            'textarea[placeholder*="描述"]',
-            'textarea[placeholder*="简介"]',
-            'textarea[placeholder*="内容"]',
-            'textarea[name*="content"]',
-            'textarea[name*="desc"]',
-            "textarea",
-            ".ant-input",
-            "#content",
-            "#description",
-            ".form-textarea",
-          ];
-
-          for (const selector of descSelectors) {
-            const descElement = document.querySelector(selector) as HTMLTextAreaElement;
-            if (descElement && descElement.offsetParent !== null) {
-              console.log("✅ 找到描述输入框:", selector);
-
-              try {
-                descElement.focus();
-                descElement.value = description;
-
-                // 触发多种事件
-                descElement.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
-                descElement.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-
-                console.log("✅ 描述填写成功");
-                return;
-              } catch (e) {
-                console.error("设置描述值时出错:", e);
-              }
-            }
-          }
-
-          console.log("❌ 未找到可用的描述输入框");
-          return;
-        } catch (error) {
-          console.error("填写描述失败:", error);
-          return;
-        }
-      }
-
-      /**
-       * 上传视频文件
-       */
-      public async uploadVideo(videoData: any): Promise<void> {
-        try {
-          console.log("📹 开始上传视频...");
-
-          // 获取视频文件
-          let file: File;
-          if (videoData.videoFile) {
-            file = videoData.videoFile;
-          } else if (videoData.url) {
-            const response = await fetch(videoData.url);
-            const arrayBuffer = await response.arrayBuffer();
-            const extension = videoData.name.split(".").pop() || "mp4";
-            const fileName = `${videoData.name.replace(/\.[^/.]+$/, "")}.${extension}`;
-            file = new File([arrayBuffer], fileName, { type: "video/mp4" });
-          } else {
-            console.error("❌ 无效的视频数据");
-            return;
-          }
-
-          console.log("📁 视频文件:", file.name, file.size, file.type);
-
-          // 等待页面完全加载
-          console.log("⏳ 等待页面加载完成...");
-          await this.sleep(5000);
-
-          // 查找上传区域
-          console.log("🔍 查找易车上传区域...");
-          const uploadSelectors = [
-            ".upload-area",
-            ".video-upload",
-            '[class*="upload"]',
-            '[class*="video"]',
-            ".ant-upload",
-            "#upload",
-            ".upload-btn",
-            'button[class*="upload"]',
-            ".upload-container",
-          ];
-
-          let uploadArea: HTMLElement | null = null;
-          for (const selector of uploadSelectors) {
-            const element = document.querySelector(selector) as HTMLElement | null;
-            if (element && element.offsetParent !== null) {
-              console.log(`✅ 找到上传区域: ${selector}`);
-              uploadArea = element;
-              break;
-            }
-          }
-
-          if (!uploadArea) {
-            console.log("❌ 未找到上传区域，尝试查找文件输入框...");
-
-            // 直接查找文件输入框
-            const fileInputs = document.querySelectorAll('input[type="file"]');
-            console.log(`🔍 找到 ${fileInputs.length} 个文件输入框`);
-
-            let targetInput: HTMLInputElement | null = null;
-            fileInputs.forEach((input, index) => {
-              const accept = input.getAttribute("accept") || "";
-              console.log(`  输入框 ${index + 1}: accept="${accept}"`);
-
-              // 优先查找视频文件输入框
-              if (accept.includes("video") || accept.includes("*") || accept === "") {
-                targetInput = input as HTMLInputElement;
-                console.log(`✅ 选择输入框 ${index + 1} 作为目标`);
-              }
-            });
-
-            if (targetInput) {
-              // 使用DataTransfer API设置文件
-              const dataTransfer = new DataTransfer();
-              dataTransfer.items.add(file);
-              targetInput.files = dataTransfer.files;
-
-              // 触发change事件
-              targetInput.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-              console.log("✅ 文件已设置到输入框");
-              return;
-            }
-            console.log("❌ 未找到合适的文件输入框");
-            return;
-          }
-
-          // 如果找到了上传区域，尝试点击或操作
-          console.log("🔄 尝试操作上传区域...");
-
-          // 查找上传区域内的文件输入框
-          const uploadInput = uploadArea.querySelector('input[type="file"]') as HTMLInputElement;
-          if (uploadInput) {
-            console.log("✅ 在上传区域内找到文件输入框");
-
-            // 创建透明的文件输入框覆盖上传区域
-            const overlayInput = document.createElement("input");
-            overlayInput.type = "file";
-            overlayInput.accept = "video/*,.mp4,.avi,.mov,.wmv";
-            overlayInput.style.position = "absolute";
-            overlayInput.style.opacity = "0";
-            overlayInput.style.width = "100%";
-            overlayInput.style.height = "100%";
-            overlayInput.style.top = "0";
-            overlayInput.style.left = "0";
-            overlayInput.style.zIndex = "9999";
-            overlayInput.id = `yiche_upload_${Date.now()}`;
-
-            // 设置上传区域样式以支持覆盖
-            const uploadElement = uploadArea as HTMLElement;
-            uploadElement.style.position = "relative";
-            uploadElement.appendChild(overlayInput);
-
-            // 设置文件
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            overlayInput.files = dataTransfer.files;
-
-            // 触发文件选择事件
-            overlayInput.dispatchEvent(new Event("focus", { bubbles: true }));
-            overlayInput.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-
-            console.log("✅ 文件已设置到覆盖输入框");
-
-            // 尝试点击上传区域（如果需要）
-            if (uploadArea.tagName === "BUTTON" || uploadArea.closest("button")) {
-              console.log("🖱️ 点击上传按钮...");
-              ((uploadArea.closest("button") as HTMLElement) || uploadArea).click();
-              await this.sleep(1000);
-            }
-
-            // 等待上传开始
-            await this.waitForUploadStart();
-
-            return;
-          }
-          console.log("⚠️ 上传区域内未找到文件输入框，尝试点击上传区域...");
-
-          // 点击上传区域触发文件选择
-          const clickableElement = uploadArea.closest("button") || uploadArea.querySelector("button") || uploadArea;
-          if (clickableElement) {
-            console.log("🖱️ 点击可点击元素...");
-            (clickableElement as HTMLElement).click();
-            await this.sleep(2000);
-
-            // 再次查找文件输入框
-            const newFileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-            if (newFileInput) {
-              const dataTransfer = new DataTransfer();
-              dataTransfer.items.add(file);
-              newFileInput.files = dataTransfer.files;
-              newFileInput.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-              console.log("✅ 文件已设置到新找到的输入框");
-              return;
-            }
-          }
-
-          console.log("⚠️ 无法直接上传文件，但页面可能已经准备好了");
-          return;
-        } catch (error) {
-          console.error("❌ 视频上传失败:", error);
-          return;
-        }
-      }
-
-      /**
-       * 等待上传开始
-       */
-      private async waitForUploadStart(): Promise<void> {
-        console.log("⏳ 等待上传开始...");
-
-        for (let i = 0; i < 30; i++) {
-          await this.sleep(1000);
-
-          // 检查上传进度指示器
-          const progressSelectors = [
-            '[class*="progress"]',
-            '[class*="uploading"]',
-            '[class*="upload-progress"]',
-            ".ant-progress",
-            ".progress-bar",
-            ".uploading",
-          ];
-
-          for (const selector of progressSelectors) {
-            const elements = document.querySelectorAll(selector);
-            if (elements.length > 0) {
-              console.log("✅ 检测到上传进度指示器");
-              return;
-            }
-          }
-
-          // 检查是否有上传成功标志
-          const successSelectors = ['[class*="success"]', '[class*="complete"]', '[class*="done"]', ".upload-success"];
-
-          for (const selector of successSelectors) {
-            const elements = document.querySelectorAll(selector);
-            if (elements.length > 0) {
-              console.log("✅ 检测到上传成功标志");
-              return;
-            }
-          }
-        }
-
-        console.log("⚠️ 未检测到明确的上传状态，但可能已开始");
-      }
-    };
-
-    console.log("✅ 易车上传器类定义完成");
-
-    const uploader = new YicheVideoUploader();
-    console.log("✅ 易车上传器实例创建完成");
-
-    // 步骤1: 填写标题
-    if (title) {
-      console.log("📝 填写标题:", title);
-      await uploader.fillTitle(title);
-    }
-
-    // 步骤2: 填写描述
-    if (content) {
-      console.log("📝 填写描述:", `${content.substring(0, 100)}...`);
-      await uploader.fillDescription(content);
-    }
-
-    // 步骤3: 上传视频
-    if (video) {
-      console.log("🎥 开始上传视频...");
-      await uploader.uploadVideo(video);
-    } else {
-      console.error("❌ 缺少视频文件");
+    if (textbox) {
+      (textbox as HTMLInputElement).value = value;
+      textbox.dispatchEvent(new Event("input", { bubbles: true }));
+      textbox.dispatchEvent(new Event("change", { bubbles: true }));
+      console.log("[易车] ✅ 已填写 textbox:", value.substring(0, 30));
       return;
     }
 
-    console.log("🎉 易车视频发布流程完成");
-    return;
-  } catch (error) {
-    console.error("💥 易车视频发布失败:", error);
-    console.error("错误详情:", error.stack);
-    return;
+    console.warn("[易车] ⚠️ 未找到输入框:", placeholder);
   }
+
+  function selectRadioByText(text: string): void {
+    const radios = document.querySelectorAll('[role="radio"]');
+    for (const radio of radios) {
+      if (radio.textContent?.includes(text)) {
+        clickElement(radio);
+        console.log("[易车] ✅ 已选择:", text);
+        return;
+      }
+    }
+
+    const radioInputs = document.querySelectorAll('input[type="radio"]');
+    for (const radio of radioInputs) {
+      const label = radio.parentElement?.textContent || "";
+      if (label.includes(text)) {
+        (radio as HTMLInputElement).checked = true;
+        radio.dispatchEvent(new Event("change", { bubbles: true }));
+        console.log("[易车] ✅ 已选择:", text);
+        return;
+      }
+    }
+
+    console.warn("[易车] ⚠️ 未找到单选框:", text);
+  }
+
+  // ========== 主流程 ==========
+
+  console.log("[易车] ===== 开始发布流程 =====");
+  console.log("[易车] 当前页面:", window.location.href);
+
+  try {
+    if (!window.location.href.includes("mp.yiche.com")) {
+      console.error("[易车] ❌ 不在易车页面");
+      return;
+    }
+
+    if (!data || !data.data) {
+      console.error("[易车] ❌ 缺少数据");
+      return;
+    }
+
+    const { content, video, title, cover, verticalCover, focusImage } = data.data as VideoData;
+    console.log("[易车] 数据解析:", {
+      hasTitle: !!title,
+      hasContent: !!content,
+      hasVideo: !!video,
+      hasCover: !!cover,
+      hasVerticalCover: !!verticalCover,
+      hasFocusImage: !!focusImage,
+      title: title?.substring(0, 30),
+    });
+
+    if (video?.url) {
+      console.log("[易车] 步骤1/7: 上传视频文件");
+      const success = await uploadVideoFile(video);
+      if (!success) {
+        console.error("[易车] ❌ 视频上传失败，终止流程");
+        return;
+      }
+      console.log("[易车] ✅ 视频上传成功");
+    } else {
+      console.warn("[易车] ⚠️ 没有视频文件，跳过上传");
+    }
+
+    console.log("[易车] 步骤2/7: 等待表单加载");
+    await waitForFormReady();
+    console.log("[易车] ✅ 表单已加载");
+
+    if (title) {
+      console.log("[易车] 步骤3/7: 填写标题");
+      fillInputByPlaceholder("标题最多可输入50字", title);
+    }
+
+    if (content) {
+      console.log("[易车] 步骤4/7: 填写简介");
+      fillInputByPlaceholder("简介最多可输入400字", content);
+    }
+
+    if (cover?.url) {
+      console.log("[易车] 步骤5/7: 上传封面");
+      await uploadCoverImage(cover);
+    }
+
+    if (verticalCover?.url) {
+      console.log("[易车] 步骤6/7: 上传竖版封面");
+      await uploadVerticalCoverImage(verticalCover);
+    }
+
+    if (focusImage?.url) {
+      console.log("[易车] 步骤7/7: 上传焦点图");
+      await uploadFocusImage(focusImage);
+    }
+
+    console.log("[易车] 选择版权: 原创");
+    selectRadioByText("原创");
+
+    console.log("[易车] ===== 发布流程完成 =====");
+    console.log("[易车] ℹ️ 请手动点击提交按钮");
+  } catch (error) {
+    console.error("[易车] 💥 发布失败:", error);
+  }
+}
+
+// 导出全局工具（用于调试）
+if (typeof window !== "undefined") {
+  (window as any).YicheMCP = {
+    status: () => ({
+      url: window.location.href,
+      hasVideoInput: !!document.querySelector('input[type="file"]'),
+      inputs: document.querySelectorAll('[role="textbox"], input, textarea').length,
+    }),
+  };
+  console.log("[易车] ✅ YicheMCP 工具已加载");
 }

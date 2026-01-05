@@ -58,6 +58,7 @@ export interface VideoData {
   tags?: string[];
   cover?: FileData;
   verticalCover?: FileData;
+  focusImage?: FileData;
   videoFile?: File; // 原始 File 对象，用于避免 blob URL 问题
   scheduledPublishTime?: number;
 }
